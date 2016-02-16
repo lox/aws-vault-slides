@@ -1,0 +1,92 @@
+Building aws-vault in golang
+https://github.com/99designs/aws-vault
+
+Lachlan Donald
+CTO, 99designs
+
+* What is aws-vault?
+
+aws-vault provides a more secure way of storing and accessing AWS credentials for usage on the command-line.
+
+Rather than exposing your credentials via a file or environment, it generates temporary session credentials as needed to limit the scope of a leak or disclosure. Multi-factor auth is recommended.
+
+The master keys are stored in your platform's secure key store and are never directly exposed to your environment. Currently Keychain (OSX) and KWallet (Linux) are supported.
+
+
+* How it works
+
+aws-vault acts as a bridge between your systems credential stores and Amazon's STS (Secure Token Service).
+
+Keys are provided to subprocesses via environment variables, which is compatible with almost every aws tool we've encountered.
+
+	~  › aws-vault exec 99designs -- aws configure list
+	      Name                    Value             Type    Location
+	      ----                    -----             ----    --------
+	   profile                <not set>             None    None
+	access_key     ****************ARSA              env
+	secret_key     ****************/pPa              env
+	    region                us-east-1              env    AWS_DEFAULT_REGION
+
+* Why aws-vault?
+
+Current "best practice" is to store credentials in `~/.aws/credentials`, or more frequently as environment variables set in your `.profile`.
+
+This leaves them at the mercy of any third-party code running on your system, or accessible via physical access of your laptop or a backup.
+
+Using static credentials also provides opportunity to accidentally commit them along with code.
+
+.link https://github.com/joho/aws-pony.
+
+* Why build it in golang?
+
+- A single, statically compiled binary (with code signing)
+- Golang is great for command line tools
+- 99designs <3 Golang
+
+* Package structure for a command-line app
+
+- main package at the top, subpackages for mfa prompting and keyring access
+- main.go deals with command-line parsing, provides structs to commands
+- very light abstraction of Ui provided to commands
+- different loggers for log levels
+
+.link https://github.com/99designs/aws-vault/blob/master/main.go
+
+* Playing nice with the Golang AWS SDK
+
+- aws-vault implements AWS' credentials.Provider interface
+.link https://docs.aws.amazon.com/sdk-for-go/api/aws/credentials/Provider.html
+- aws-vault uses the built in credential config, so it reads .aws/config for things like profiles and config
+
+* Challenge 1: OSX Keychain API in Golang
+
+CGO is unpleasant, CGO + ObjC takes that to a new place, especially as a ObjectiveC newbie.
+
+- Juggling between go types, c types and CoreFoundation wrappers
+- Playing nicely with ObjC's reference counting
+- Trying to wrangle various third-party open source projects.
+
+.link https://github.com/99designs/aws-vault/blob/master/keyring/keychain.go
+
+* Challenge 2: Refreshing credentials for long-running processes
+
+Because the session credentials provided to subprocesses are time-limited, long running processes like packer need refreshed credentials if they run for long enough.
+
+After some false starts, our solution was to hijack the EC2 Metadata Url that all modern AWS SDKs check for refreshed credentials:
+
+	http://169.254.169.254/latest/meta-data/iam/security-credentials/local-credentials
+
+This is enabled with the `--server` switch to aws-vault.
+
+The trade-off is that any code on your system can access temporary credentials via this url and you can only have one server bound set of credentials running at any one time.
+
+* What's Next?
+
+- Broader community adoption! Let us know how it works!
+- Master credential rotation
+- SAML/Federation integration
+
+* Questions?
+
+.link https://99designs.com/tech-blog/blog/2015/10/26/aws-vault/
+.link https://github.com/99designs/aws-vault
